@@ -1,0 +1,59 @@
+name: Build UAssetEdit APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # GitHub's web uploader doesn't extract zips; unpack if the project was uploaded as a zip.
+      - name: Extract uploaded zip (only if needed)
+        run: |
+          if [ ! -d UAssetEdit ]; then
+            z=$(ls *.zip 2>/dev/null | head -n1 || true)
+            if [ -z "$z" ]; then echo "No project files and no zip found"; exit 1; fi
+            rm -rf _x && mkdir _x && unzip -q "$z" -d _x
+            top=$(find _x -mindepth 1 -maxdepth 1 -type d | head -n1)
+            [ -d "$top/UAssetEdit" ] || top=_x
+            cp -a "$top"/. .
+          fi
+          ls -la
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+
+      - name: Install Android workload
+        run: dotnet workload install android
+
+      - name: Get UAssetAPI source
+        run: |
+          git clone --depth 1 https://github.com/atenfyr/UAssetAPI.git UAssetAPI
+          find UAssetAPI -name "UAssetAPI.csproj"
+          grep -i "TargetFramework" "$(find UAssetAPI -name UAssetAPI.csproj | head -n1)" || true
+
+      - name: Build APK
+        run: |
+          UA=$(realpath "$(find UAssetAPI -name UAssetAPI.csproj | head -n1)")
+          dotnet build UAssetEdit/UAssetEdit.csproj -c Release \
+            -p:UAssetApiProj="$UA" \
+            -p:AndroidSdkDirectory="$ANDROID_HOME" \
+            -p:AcceptAndroidSDKLicenses=True \
+            -p:InstallAndroidDependencies=true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uassetedit-apk
+          path: UAssetEdit/bin/Release/**/*Signed.apk
